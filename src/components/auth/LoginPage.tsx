@@ -16,7 +16,6 @@ import {
   Users,
 } from 'lucide-react';
 import { useTenantAuth } from '../../context/TenantAuthContext';
-import { InviteRedemptionModal } from './InviteRedemptionModal';
 import { EduvoraLogo } from '../common/EduvoraLogo';
 
 export const LoginPage: React.FC = () => {
@@ -31,7 +30,6 @@ export const LoginPage: React.FC = () => {
   const [isForgotModalOpen, setIsForgotModalOpen] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotSuccess, setForgotSuccess] = useState(false);
-  const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -221,21 +219,6 @@ export const LoginPage: React.FC = () => {
               )}
             </button>
           </form>
-
-          {/* Institutional Teacher Invite Redemption Entry */}
-          <div className="mt-8 pt-6 border-t border-stone-100 flex flex-col items-center text-center">
-            <p className="text-xs text-stone-500 mb-2">
-              Have an institutional invitation token or key?
-            </p>
-            <button
-              type="button"
-              onClick={() => setIsInviteModalOpen(true)}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-stone-200 hover:border-stone-300 bg-stone-50/70 hover:bg-stone-100 text-stone-700 text-xs font-bold transition-all shadow-2xs"
-            >
-              <KeyRound className="w-3.5 h-3.5 text-blue-600" />
-              <span>Redeem Staff Invitation Key</span>
-            </button>
-          </div>
         </div>
       </div>
 
@@ -403,12 +386,6 @@ export const LoginPage: React.FC = () => {
           </div>
         </div>
       )}
-
-      {/* Staff Invite Redemption Modal */}
-      <InviteRedemptionModal
-        isOpen={isInviteModalOpen}
-        onClose={() => setIsInviteModalOpen(false)}
-      />
     </div>
   );
 };

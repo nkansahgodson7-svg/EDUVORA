@@ -34,6 +34,7 @@ interface OfflineQueueItem {
 interface TenantAuthContextType {
   // Tenancy & Auth
   allTenants: Tenant[];
+  allUsers: UserProfile[];
   currentTenant: Tenant;
   currentUser: UserProfile;
   availableTeachers: UserProfile[];
@@ -65,10 +66,12 @@ interface TenantAuthContextType {
   switchTenant: (schoolId: string) => void;
   loginAsRole: (role: UserRole, specificUserId?: string, targetSchoolId?: string) => void;
   provisionNewTenant: (
-    tenantData: { name: string; subdomain: string; subscription_tier: 'starter' | 'growth' | 'enterprise'; primary_color: string },
-    adminData: { name: string; email: string },
+    tenantData: { name: string; subdomain: string; address: string; headmaster_name: string },
+    adminData: { name: string; email: string; phone: string },
     seedPreset: 'standard' | 'secondary' | 'minimal'
   ) => { school: Tenant; admin: UserProfile };
+  updateTenant: (tenantId: string, data: Partial<Tenant>) => void;
+  deleteTenant: (tenantId: string) => void;
   updateTenantSettings: (settings: Partial<Tenant>) => void;
   
   // Teachers Management
@@ -97,19 +100,19 @@ interface TenantAuthContextType {
 const TenantAuthContext = createContext<TenantAuthContextType | undefined>(undefined);
 
 const STORAGE_KEYS = {
-  TENANTS: 'edutenant_tenants_v1',
-  CURRENT_TENANT_ID: 'edutenant_cur_tenant_id_v1',
-  CURRENT_USER_ID: 'edutenant_cur_user_id_v1',
-  IS_AUTHENTICATED: 'edutenant_is_authenticated_v1',
-  USERS: 'edutenant_users_v1',
-  CLASSES: 'edutenant_classes_v1',
-  SUBJECTS: 'edutenant_subjects_v1',
-  ALLOCATIONS: 'edutenant_allocations_v1',
-  STUDENTS: 'edutenant_students_v1',
-  SHEETS: 'edutenant_sheets_v1',
-  SCORES: 'edutenant_scores_v1',
-  AUDIT: 'edutenant_audit_v1',
-  OFFLINE_QUEUE: 'edutenant_offline_queue_v1',
+  TENANTS: 'edutenant_tenants_v2',
+  CURRENT_TENANT_ID: 'edutenant_cur_tenant_id_v2',
+  CURRENT_USER_ID: 'edutenant_cur_user_id_v2',
+  IS_AUTHENTICATED: 'edutenant_is_authenticated_v2',
+  USERS: 'edutenant_users_v2',
+  CLASSES: 'edutenant_classes_v2',
+  SUBJECTS: 'edutenant_subjects_v2',
+  ALLOCATIONS: 'edutenant_allocations_v2',
+  STUDENTS: 'edutenant_students_v2',
+  SHEETS: 'edutenant_sheets_v2',
+  SCORES: 'edutenant_scores_v2',
+  AUDIT: 'edutenant_audit_v2',
+  OFFLINE_QUEUE: 'edutenant_offline_queue_v2',
 };
 
 function loadStorage<T>(key: string, fallback: T): T {
@@ -124,8 +127,8 @@ function loadStorage<T>(key: string, fallback: T): T {
 export const TenantAuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   // State initialization with localStorage fallback
   const [allTenants, setAllTenants] = useState<Tenant[]>(() => loadStorage(STORAGE_KEYS.TENANTS, INITIAL_TENANTS));
-  const [currentTenantId, setCurrentTenantId] = useState<string>(() => loadStorage(STORAGE_KEYS.CURRENT_TENANT_ID, INITIAL_TENANTS[0].id));
-  const [currentUserId, setCurrentUserId] = useState<string>(() => loadStorage(STORAGE_KEYS.CURRENT_USER_ID, INITIAL_USERS[1].id)); // default to Eleanor Hayes
+  const [currentTenantId, setCurrentTenantId] = useState<string>(() => loadStorage(STORAGE_KEYS.CURRENT_TENANT_ID, INITIAL_TENANTS[0]?.id || ''));
+  const [currentUserId, setCurrentUserId] = useState<string>(() => loadStorage(STORAGE_KEYS.CURRENT_USER_ID, INITIAL_USERS[0]?.id || ''));
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => loadStorage(STORAGE_KEYS.IS_AUTHENTICATED, false));
 
   const [users, setUsers] = useState<UserProfile[]>(() => loadStorage(STORAGE_KEYS.USERS, INITIAL_USERS));
@@ -159,29 +162,32 @@ export const TenantAuthProvider: React.FC<{ children: ReactNode }> = ({ children
 
   // Derived Active Entities
   const currentTenant = useMemo(() => {
-    return allTenants.find((t) => t.id === currentTenantId) || allTenants[0];
+    return allTenants.find((t) => t.id === currentTenantId) || allTenants[0] || null;
   }, [allTenants, currentTenantId]);
 
   const currentUser = useMemo(() => {
     const user = users.find((u) => u.id === currentUserId);
     if (user) return user;
-    // Fallback to first school admin of current tenant
-    const admin = users.find((u) => u.school_id === currentTenant.id && u.role === 'school_admin');
-    return admin || users[0];
+    if (currentTenant) {
+      // Fallback to first school admin of current tenant
+      const admin = users.find((u) => u.school_id === currentTenant.id && u.role === 'school_admin');
+      if (admin) return admin;
+    }
+    return users[0];
   }, [users, currentUserId, currentTenant]);
 
   // Tenant Scoped Data Filters
-  const tenantClasses = useMemo(() => classes.filter((c) => c.school_id === currentTenant.id), [classes, currentTenant.id]);
-  const tenantSubjects = useMemo(() => subjects.filter((s) => s.school_id === currentTenant.id), [subjects, currentTenant.id]);
-  const tenantAllocations = useMemo(() => allocations.filter((a) => a.school_id === currentTenant.id), [allocations, currentTenant.id]);
-  const tenantStudents = useMemo(() => students.filter((s) => s.school_id === currentTenant.id), [students, currentTenant.id]);
-  const tenantAssessmentSheets = useMemo(() => assessmentSheets.filter((sh) => sh.school_id === currentTenant.id), [assessmentSheets, currentTenant.id]);
-  const tenantScores = useMemo(() => studentScores.filter((sc) => sc.school_id === currentTenant.id), [studentScores, currentTenant.id]);
-  const tenantAuditLogs = useMemo(() => auditLogs.filter((l) => l.school_id === currentTenant.id), [auditLogs, currentTenant.id]);
+  const tenantClasses = useMemo(() => currentTenant ? classes.filter((c) => c.school_id === currentTenant.id) : [], [classes, currentTenant]);
+  const tenantSubjects = useMemo(() => currentTenant ? subjects.filter((s) => s.school_id === currentTenant.id) : [], [subjects, currentTenant]);
+  const tenantAllocations = useMemo(() => currentTenant ? allocations.filter((a) => a.school_id === currentTenant.id) : [], [allocations, currentTenant]);
+  const tenantStudents = useMemo(() => currentTenant ? students.filter((s) => s.school_id === currentTenant.id) : [], [students, currentTenant]);
+  const tenantAssessmentSheets = useMemo(() => currentTenant ? assessmentSheets.filter((sh) => sh.school_id === currentTenant.id) : [], [assessmentSheets, currentTenant]);
+  const tenantScores = useMemo(() => currentTenant ? studentScores.filter((sc) => sc.school_id === currentTenant.id) : [], [studentScores, currentTenant]);
+  const tenantAuditLogs = useMemo(() => currentTenant ? auditLogs.filter((l) => l.school_id === currentTenant.id) : [], [auditLogs, currentTenant]);
 
   const availableTeachers = useMemo(() => {
-    return users.filter((u) => u.school_id === currentTenant.id && u.role === 'teacher');
-  }, [users, currentTenant.id]);
+    return currentTenant ? users.filter((u) => u.school_id === currentTenant.id && u.role === 'teacher') : [];
+  }, [users, currentTenant]);
 
   // Teacher Scoped Filters
   const teacherAllocations = useMemo(() => {
@@ -305,8 +311,8 @@ export const TenantAuthProvider: React.FC<{ children: ReactNode }> = ({ children
 
   // Super Admin: Provision New School Tenant
   const provisionNewTenant = (
-    tenantData: { name: string; subdomain: string; subscription_tier: 'starter' | 'growth' | 'enterprise'; primary_color: string },
-    adminData: { name: string; email: string },
+    tenantData: { name: string; subdomain: string; address: string; headmaster_name: string },
+    adminData: { name: string; email: string; phone: string },
     seedPreset: 'standard' | 'secondary' | 'minimal'
   ) => {
     const newSchoolId = `school-${tenantData.subdomain.toLowerCase().replace(/[^a-z0-9]/g, '')}-${Date.now().toString().slice(-4)}`;
@@ -316,14 +322,15 @@ export const TenantAuthProvider: React.FC<{ children: ReactNode }> = ({ children
       name: tenantData.name,
       subdomain: tenantData.subdomain.toLowerCase(),
       logo_url: 'https://images.unsplash.com/photo-1546410531-bb4caa6b424d?w=160&auto=format&fit=crop&q=80',
-      primary_color: tenantData.primary_color || '#4f46e5',
-      subscription_tier: tenantData.subscription_tier,
+      primary_color: '#4f46e5', // Default color since it's removed from UI
+      subscription_tier: 'starter', // Default tier since it's removed from UI
       status: 'active',
       current_session: '2025/2026',
       current_term: 'First Term',
-      address: 'Educational Campus, Tech Hub',
-      phone: '+1 (555) 000-1122',
+      address: tenantData.address,
+      phone: adminData.phone,
       contact_email: adminData.email,
+      headmaster_name: tenantData.headmaster_name,
       created_at: new Date().toISOString(),
     };
 
@@ -334,7 +341,7 @@ export const TenantAuthProvider: React.FC<{ children: ReactNode }> = ({ children
       full_name: adminData.name,
       role: 'school_admin',
       status: 'active',
-      phone: '+1 (555) 000-1123',
+      phone: adminData.phone,
       created_at: new Date().toISOString(),
     };
 
@@ -395,7 +402,7 @@ export const TenantAuthProvider: React.FC<{ children: ReactNode }> = ({ children
       actor_name: currentUser.full_name,
       actor_role: currentUser.role,
       action: 'TENANT_PROVISIONED',
-      details: `Provisioned school "${tenantData.name}" (${tenantData.subdomain}) on tier ${tenantData.subscription_tier}. Master Admin credentials assigned to ${adminData.email}.`,
+      details: `Provisioned school "${tenantData.name}" (${tenantData.subdomain}). Master Admin credentials assigned to ${adminData.email}.`,
       timestamp: new Date().toISOString(),
     };
 
@@ -407,6 +414,20 @@ export const TenantAuthProvider: React.FC<{ children: ReactNode }> = ({ children
     setAuditLogs((prev) => [newLog, ...prev]);
 
     return { school: newTenant, admin: newAdmin };
+  };
+
+  const updateTenant = (tenantId: string, data: Partial<Tenant>) => {
+    setAllTenants((prev) =>
+      prev.map((t) => (t.id === tenantId ? { ...t, ...data } : t))
+    );
+  };
+
+  const deleteTenant = (tenantId: string) => {
+    setAllTenants((prev) => prev.filter((t) => t.id !== tenantId));
+    // Optionally clean up other dependent entities, or keep them around.
+    setUsers((prev) => prev.filter((u) => u.school_id !== tenantId));
+    setClasses((prev) => prev.filter((c) => c.school_id !== tenantId));
+    setStudents((prev) => prev.filter((s) => s.school_id !== tenantId));
   };
 
   const updateTenantSettings = (settings: Partial<Tenant>) => {
@@ -795,6 +816,7 @@ export const TenantAuthProvider: React.FC<{ children: ReactNode }> = ({ children
 
   const value = {
     allTenants,
+    allUsers: users,
     currentTenant,
     currentUser,
     availableTeachers,
@@ -818,6 +840,8 @@ export const TenantAuthProvider: React.FC<{ children: ReactNode }> = ({ children
     switchTenant,
     loginAsRole,
     provisionNewTenant,
+    updateTenant,
+    deleteTenant,
     updateTenantSettings,
     addTeacher,
     generateInviteKey,

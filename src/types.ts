@@ -16,6 +16,7 @@ export interface Tenant {
   address: string;
   phone: string;
   contact_email: string;
+  headmaster_name?: string;
   created_at: string;
 }
 
