@@ -1,0 +1,6 @@
+{
+  "name": "EduTenant - Multi-Tenant School Management PWA",
+  "description": "Offline-first multi-tenant school management SaaS with role-based access for Super Admin, School Master Admin, and Teachers, CA/exam score entry grid, and report cards.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

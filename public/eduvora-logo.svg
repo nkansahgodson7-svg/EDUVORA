@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <linearGradient id="eduvoraGrad" x1="0%" y1="100%" x2="50%" y2="0%">
+      <stop offset="0%" stop-color="#0284c7" />
+      <stop offset="50%" stop-color="#06b6d4" />
+      <stop offset="100%" stop-color="#10b981" />
+    </linearGradient>
+    <filter id="subtleShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="16" stdDeviation="24" flood-color="#0284c7" flood-opacity="0.28" />
+    </filter>
+  </defs>
+
+  <!-- Squircle Base -->
+  <rect x="24" y="24" width="464" height="464" rx="112" fill="url(#eduvoraGrad)" filter="url(#subtleShadow)" />
+
+  <!-- Vector Emblem: Book + Upward Growth Arrow + Sprouting Leaves + Stars -->
+  <g fill="#FFFFFF">
+    <!-- Left Book Page -->
+    <path d="M120 320 C120 280, 160 220, 216 220 C234 220, 246 228, 252 236 L252 352 C244 344, 230 338, 214 338 C172 338, 140 376, 120 380 Z" opacity="0.95" />
+    <path d="M136 320 C136 295, 165 240, 212 240 L212 344 C180 344, 150 370, 136 376 Z" fill="#F0FDFA" opacity="0.4" />
+
+    <!-- Center/Right Sweep merging into Upward Arrow -->
+    <path d="M216 338 C232 338, 256 348, 268 360 C280 346, 310 324, 340 284 L380 232 L392 276 L400 180 L308 196 L348 214 L318 256 C290 294, 266 316, 252 322 L252 236 C258 226, 274 218, 292 216 L292 196 C264 198, 244 210, 236 224 C228 210, 208 198, 180 196 L180 216 C198 218, 214 226, 220 236 L220 338 Z" />
+
+    <!-- Arrow Head Accent -->
+    <polygon points="404,176 332,192 362,222" fill="#FFFFFF" />
+
+    <!-- Sprouting Leaves -->
+    <!-- Leaf 1 -->
+    <path d="M280 260 C280 240, 296 228, 312 226 C314 242, 302 258, 280 260 Z" />
+    <!-- Leaf 2 -->
+    <path d="M268 286 C262 270, 272 254, 290 252 C290 268, 280 284, 268 286 Z" />
+    <!-- Leaf 3 -->
+    <path d="M304 246 C308 230, 324 222, 336 222 C336 238, 322 250, 304 246 Z" />
+
+    <!-- Sparkling Stars -->
+    <!-- Star 1 (Top Center) -->
+    <path d="M304 168 C305 174, 308 177, 314 178 C308 179, 305 182, 304 188 C303 182, 300 179, 294 178 C300 177, 303 174, 304 168 Z" />
+    <!-- Star 2 (Top Right) -->
+    <path d="M344 148 C345 156, 350 161, 358 162 C350 163, 345 168, 344 176 C343 168, 338 163, 330 162 C338 161, 343 156, 344 148 Z" />
+  </g>
+</svg>
