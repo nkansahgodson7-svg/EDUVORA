@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, ReactNode } from 'react';
+import { supabase } from '../lib/supabase';
 import {
   Tenant,
   UserProfile,
@@ -10,6 +11,7 @@ import {
   StudentScore,
   AuditLog,
   UserRole,
+  SubscriptionTier,
 } from '../types';
 import {
   INITIAL_TENANTS,
@@ -73,6 +75,8 @@ interface TenantAuthContextType {
   updateTenant: (tenantId: string, data: Partial<Tenant>) => void;
   deleteTenant: (tenantId: string) => void;
   updateTenantSettings: (settings: Partial<Tenant>) => void;
+  refreshTenants: () => Promise<void>;
+  registerSchool: (school: { id: string; name: string; code: string; adminEmail?: string }) => void;
   
   // Teachers Management
   addTeacher: (name: string, email: string, phone?: string) => UserProfile;
@@ -95,6 +99,7 @@ interface TenantAuthContextType {
   reviewAssessmentSheet: (sheetId: string, action: 'approved' | 'rejected', adminRemarks?: string) => void;
   getOrCreateSheet: (classId: string, subjectId: string, teacherId: string) => AssessmentSheet;
   resetAllData: () => void;
+  nukeDatabase: () => Promise<{ success: boolean; message: string }>;
 }
 
 const TenantAuthContext = createContext<TenantAuthContextType | undefined>(undefined);
@@ -160,6 +165,104 @@ export const TenantAuthProvider: React.FC<{ children: ReactNode }> = ({ children
   useEffect(() => { localStorage.setItem(STORAGE_KEYS.AUDIT, JSON.stringify(auditLogs)); }, [auditLogs]);
   useEffect(() => { localStorage.setItem(STORAGE_KEYS.OFFLINE_QUEUE, JSON.stringify(offlineQueue)); }, [offlineQueue]);
 
+  // Supabase Tenant Synchronization
+  const refreshTenants = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('schools')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        if (error.code !== 'PGRST125') {
+          console.warn('Could not fetch schools from database:', error.message);
+        }
+        return;
+      }
+
+      if (data && data.length > 0) {
+        setAllTenants((prevTenants) => {
+          const supabaseTenants: Tenant[] = data.map((s: any) => ({
+            id: s.id,
+            name: s.name || 'Unnamed School',
+            subdomain: s.code || s.subdomain || (s.name ? s.name.toLowerCase().replace(/[^a-z0-9]/g, '') : 'school'),
+            logo_url: s.logo_url || '',
+            primary_color: s.primary_color || '#1a56db',
+            subscription_tier: (s.subscription_tier as SubscriptionTier) || 'growth',
+            status: (s.status === 'onboarding' || !s.status) ? 'active' : s.status,
+            current_session: s.current_session || '2025/2026',
+            current_term: s.current_term || 'First Term',
+            address: s.address || '',
+            phone: s.phone || '',
+            contact_email: s.contact_email || '',
+            headmaster_name: s.headmaster_name || '',
+            created_at: s.created_at || new Date().toISOString(),
+          }));
+
+          // Merge: Supabase tenants take precedence, keep any mock/local tenants
+          const merged = [...supabaseTenants];
+          for (const prev of prevTenants) {
+            if (!merged.some((t) => t.id === prev.id)) {
+              merged.push(prev);
+            }
+          }
+          return merged;
+        });
+      }
+    } catch (err) {
+      console.warn('Error syncing schools from database:', err);
+    }
+  }, []);
+
+  // Fetch Supabase schools on mount
+  useEffect(() => {
+    refreshTenants();
+  }, [refreshTenants]);
+
+  const registerSchool = useCallback((school: { id: string; name: string; code: string; adminEmail?: string }) => {
+    const newTenant: Tenant = {
+      id: school.id,
+      name: school.name,
+      subdomain: school.code || school.name.toLowerCase().replace(/[^a-z0-9]/g, ''),
+      logo_url: '',
+      primary_color: '#1a56db',
+      subscription_tier: 'growth',
+      status: 'active',
+      current_session: '2025/2026',
+      current_term: 'First Term',
+      address: '',
+      phone: '',
+      contact_email: school.adminEmail || '',
+      headmaster_name: 'School Administrator',
+      created_at: new Date().toISOString(),
+    };
+
+    const newAdmin: UserProfile = {
+      id: `admin-${school.id}`,
+      school_id: school.id,
+      email: school.adminEmail || `admin@${school.code}.edu`,
+      full_name: 'School Administrator',
+      role: 'school_admin',
+      status: 'active',
+      created_at: new Date().toISOString(),
+    };
+
+    setAllTenants((prev) => {
+      const filtered = prev.filter((t) => t.id !== school.id);
+      return [newTenant, ...filtered];
+    });
+
+    if (school.adminEmail) {
+      setUsers((prev) => {
+        const filtered = prev.filter((u) => !(u.school_id === school.id && u.role === 'school_admin'));
+        return [newAdmin, ...filtered];
+      });
+    }
+
+    // Refresh database in background
+    refreshTenants();
+  }, [refreshTenants]);
+
   // Derived Active Entities
   const currentTenant = useMemo(() => {
     return allTenants.find((t) => t.id === currentTenantId) || allTenants[0] || null;
@@ -217,7 +320,7 @@ export const TenantAuthProvider: React.FC<{ children: ReactNode }> = ({ children
 
   // Quick Role / Impersonation Login
   const loginAsRole = (role: UserRole, specificUserId?: string, targetSchoolId?: string) => {
-    const schoolToUse = targetSchoolId || currentTenant.id;
+    const schoolToUse = targetSchoolId || currentTenant?.id || '';
     setIsAuthenticated(true);
     if (specificUserId) {
       const targetUser = users.find((u) => u.id === specificUserId);
@@ -232,11 +335,23 @@ export const TenantAuthProvider: React.FC<{ children: ReactNode }> = ({ children
       const superUser = users.find((u) => u.role === 'super_admin');
       if (superUser) setCurrentUserId(superUser.id);
     } else if (role === 'school_admin') {
-      const schoolAdmin = users.find((u) => u.school_id === schoolToUse && u.role === 'school_admin');
-      if (schoolAdmin) {
-        setCurrentUserId(schoolAdmin.id);
-        setCurrentTenantId(schoolToUse);
+      let schoolAdmin = users.find((u) => u.school_id === schoolToUse && u.role === 'school_admin');
+      if (!schoolAdmin) {
+        const tenant = allTenants.find((t) => t.id === schoolToUse);
+        const newAdmin: UserProfile = {
+          id: `admin-${schoolToUse}`,
+          school_id: schoolToUse,
+          email: tenant?.contact_email || `admin@${tenant?.subdomain || 'school'}.edu`,
+          full_name: tenant?.headmaster_name || `${tenant?.name || 'School'} Administrator`,
+          role: 'school_admin',
+          status: 'active',
+          created_at: new Date().toISOString(),
+        };
+        setUsers((prev) => [newAdmin, ...prev]);
+        schoolAdmin = newAdmin;
       }
+      setCurrentUserId(schoolAdmin.id);
+      setCurrentTenantId(schoolToUse);
     } else if (role === 'teacher') {
       const teacher = users.find((u) => u.school_id === schoolToUse && u.role === 'teacher');
       if (teacher) {
@@ -420,14 +535,33 @@ export const TenantAuthProvider: React.FC<{ children: ReactNode }> = ({ children
     setAllTenants((prev) =>
       prev.map((t) => (t.id === tenantId ? { ...t, ...data } : t))
     );
+    const isUUID = (str: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+    if (isUUID(tenantId)) {
+      const dbUpdates: any = {};
+      if (data.name) dbUpdates.name = data.name;
+      if (data.subdomain) dbUpdates.code = data.subdomain;
+      if (data.status) dbUpdates.status = data.status;
+      if (Object.keys(dbUpdates).length > 0) {
+        supabase.from('schools').update(dbUpdates).eq('id', tenantId).then(({ error }) => {
+          if (error) console.warn('Could not update school in database:', error.message);
+        });
+      }
+    }
   };
 
   const deleteTenant = (tenantId: string) => {
     setAllTenants((prev) => prev.filter((t) => t.id !== tenantId));
-    // Optionally clean up other dependent entities, or keep them around.
+    // Clean up other dependent entities
     setUsers((prev) => prev.filter((u) => u.school_id !== tenantId));
     setClasses((prev) => prev.filter((c) => c.school_id !== tenantId));
     setStudents((prev) => prev.filter((s) => s.school_id !== tenantId));
+
+    const isUUID = (str: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+    if (isUUID(tenantId)) {
+      supabase.from('schools').delete().eq('id', tenantId).then(({ error }) => {
+        if (error) console.warn('Could not delete school from database:', error.message);
+      });
+    }
   };
 
   const updateTenantSettings = (settings: Partial<Tenant>) => {
@@ -800,9 +934,9 @@ export const TenantAuthProvider: React.FC<{ children: ReactNode }> = ({ children
   const resetAllData = () => {
     localStorage.clear();
     setAllTenants(INITIAL_TENANTS);
-    setCurrentTenantId(INITIAL_TENANTS[0].id);
+    setCurrentTenantId(INITIAL_TENANTS[0]?.id || '');
     setUsers(INITIAL_USERS);
-    setCurrentUserId(INITIAL_USERS[1].id);
+    setCurrentUserId(INITIAL_USERS[0]?.id || '');
     setClasses(INITIAL_CLASSES);
     setSubjects(INITIAL_SUBJECTS);
     setAllocations(INITIAL_ALLOCATIONS);
@@ -812,6 +946,62 @@ export const TenantAuthProvider: React.FC<{ children: ReactNode }> = ({ children
     setAuditLogs(INITIAL_AUDIT_LOGS);
     setOfflineQueue([]);
     setIsOffline(false);
+  };
+
+  const nukeDatabase = async (): Promise<{ success: boolean; message: string }> => {
+    // 1. Delete all tables in Supabase in order
+    const tables = [
+      'student_scores',
+      'assessment_sheets',
+      'teacher_allocations',
+      'students',
+      'teachers',
+      'classes',
+      'subjects',
+      'audit_logs',
+      'schools',
+    ];
+
+    let errorsCount = 0;
+    for (const table of tables) {
+      try {
+        const { error } = await supabase
+          .from(table)
+          .delete()
+          .neq('id', '00000000-0000-0000-0000-000000000000');
+        if (error && error.code !== 'PGRST125') {
+          console.warn(`Could not purge table ${table}:`, error.message);
+          errorsCount++;
+        }
+      } catch (err) {
+        console.warn(`Exception purging table ${table}:`, err);
+      }
+    }
+
+    // 2. Clear all local storage keys
+    localStorage.clear();
+
+    // 3. Reset in-memory states completely
+    setAllTenants([]);
+    setCurrentTenantId('');
+    setUsers(INITIAL_USERS);
+    setCurrentUserId(INITIAL_USERS[0]?.id || '');
+    setClasses([]);
+    setSubjects([]);
+    setAllocations([]);
+    setStudents([]);
+    setAssessmentSheets([]);
+    setStudentScores([]);
+    setAuditLogs([]);
+    setOfflineQueue([]);
+    setIsOffline(false);
+
+    return {
+      success: true,
+      message: errorsCount === 0
+        ? 'Database and local storage nuked completely. Ready for a fresh start.'
+        : 'Local storage and reachable database tables cleared successfully.',
+    };
   };
 
   const value = {
@@ -843,6 +1033,8 @@ export const TenantAuthProvider: React.FC<{ children: ReactNode }> = ({ children
     updateTenant,
     deleteTenant,
     updateTenantSettings,
+    refreshTenants,
+    registerSchool,
     addTeacher,
     generateInviteKey,
     redeemInvite,
@@ -857,6 +1049,7 @@ export const TenantAuthProvider: React.FC<{ children: ReactNode }> = ({ children
     reviewAssessmentSheet,
     getOrCreateSheet,
     resetAllData,
+    nukeDatabase,
   };
 
   return <TenantAuthContext.Provider value={value}>{children}</TenantAuthContext.Provider>;

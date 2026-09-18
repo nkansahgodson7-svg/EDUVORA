@@ -1,6 +1,6 @@
 export type UserRole = 'super_admin' | 'school_admin' | 'teacher';
 
-export type TenantStatus = 'active' | 'suspended' | 'trial';
+export type TenantStatus = 'active' | 'inactive' | 'suspended' | 'trial';
 export type SubscriptionTier = 'starter' | 'growth' | 'enterprise';
 
 export interface Tenant {

@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useTenantAuth } from '../../context/TenantAuthContext';
-import { ArrowLeft, Edit2, Trash2, ShieldAlert, CheckCircle2, XCircle, Users, Activity, Building2, Save, X } from 'lucide-react';
+import { ArrowLeft, Edit2, Trash2, ShieldAlert, CheckCircle2, XCircle, Users, Activity, Building2, Save, X, Loader2, UploadCloud } from 'lucide-react';
 import { Tenant } from '../../types';
+import { supabase } from '../../lib/supabase';
+import { SchoolImportWizard } from './SchoolImportWizard';
 
 interface SchoolDetailsProps {
   tenantId: string;
@@ -11,14 +13,95 @@ interface SchoolDetailsProps {
 export const SchoolDetails: React.FC<SchoolDetailsProps> = ({ tenantId, onBack }) => {
   const { allTenants, allUsers, updateTenant, deleteTenant } = useTenantAuth();
   const tenant = allTenants.find(t => t.id === tenantId);
-
   const [isEditing, setIsEditing] = useState(false);
   const [editedTenant, setEditedTenant] = useState<Partial<Tenant>>(tenant || {});
+  
+  const [dbCounts, setDbCounts] = useState({ students: 0, teachers: 0 });
+  const [isPopulating, setIsPopulating] = useState(false);
+  const [populateStatus, setPopulateStatus] = useState<{type: 'success' | 'error', message: string} | null>(null);
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+
+  const isUUID = (str: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+
+  useEffect(() => {
+    if (!tenantId || !isUUID(tenantId)) return;
+    const fetchCounts = async () => {
+      try {
+        const [{ count: studentCount }, { count: teacherCount }] = await Promise.all([
+          supabase.from('students').select('*', { count: 'exact', head: true }).eq('school_id', tenantId),
+          supabase.from('teachers').select('*', { count: 'exact', head: true }).eq('school_id', tenantId)
+        ]);
+        setDbCounts({
+          students: studentCount || 0,
+          teachers: teacherCount || 0
+        });
+      } catch (err) {
+        console.error('Failed to fetch counts:', err);
+      }
+    };
+    fetchCounts();
+  }, [tenantId]);
   
   if (!tenant) return null;
 
   const schoolAdmin = allUsers.find(u => u.school_id === tenant.id && u.role === 'school_admin');
-  const teachersCount = allUsers.filter(u => u.school_id === tenant.id && u.role === 'teacher').length;
+
+  const handlePopulateDatabase = async () => {
+    setPopulateStatus(null);
+    setIsPopulating(true);
+    
+    // If it's a legacy local mock ID, simulate the insertion
+    if (!isUUID(tenant.id)) {
+      setTimeout(() => {
+        setDbCounts(prev => ({
+          students: prev.students + 50,
+          teachers: prev.teachers + 10
+        }));
+        setPopulateStatus({ type: 'success', message: 'Simulated inserting 50 students and 10 teachers to legacy local school!' });
+        setIsPopulating(false);
+        setTimeout(() => setPopulateStatus(null), 5000);
+      }, 1000);
+      return;
+    }
+
+    try {
+      const sampleStudents = Array.from({ length: 50 }).map((_, i) => ({
+        school_id: tenant.id,
+        student_code: `STU-${Math.floor(Math.random() * 100000)}`,
+        first_name: `Student${i + 1}`,
+        last_name: 'Sample',
+        grade_level: ['10th', '11th', '12th'][Math.floor(Math.random() * 3)],
+      }));
+      
+      const sampleTeachers = Array.from({ length: 10 }).map((_, i) => ({
+        school_id: tenant.id,
+        staff_code: `TCH-${Math.floor(Math.random() * 100000)}`,
+        first_name: `Teacher${i + 1}`,
+        last_name: 'Sample',
+        email: `teacher${i + 1}@example.com`,
+      }));
+
+      const { error: sError } = await supabase.from('students').insert(sampleStudents);
+      if (sError) throw sError;
+      
+      const { error: tError } = await supabase.from('teachers').insert(sampleTeachers);
+      if (tError) throw tError;
+
+      // Refresh counts
+      setDbCounts(prev => ({
+        students: prev.students + 50,
+        teachers: prev.teachers + 10
+      }));
+      setPopulateStatus({ type: 'success', message: 'Successfully added 50 students and 10 teachers!' });
+      
+    } catch (err: any) {
+      console.error(err);
+      setPopulateStatus({ type: 'error', message: 'Failed to populate database: ' + (err.message || 'Unknown error') });
+    } finally {
+      setIsPopulating(false);
+      setTimeout(() => setPopulateStatus(null), 5000);
+    }
+  };
 
   const handleSave = () => {
     updateTenant(tenant.id, editedTenant);
@@ -183,13 +266,20 @@ export const SchoolDetails: React.FC<SchoolDetailsProps> = ({ tenantId, onBack }
               Quick Actions
             </h2>
             <p className="text-sm text-stone-500 mb-6">
-              Populate this school's database with sample data (mock teachers, students, and classes) for testing purposes.
+              Upload an Excel (.xlsx) or CSV file to ingest student and teacher records for this school.
             </p>
+            {populateStatus && (
+              <div className={`mb-4 p-3 rounded-lg text-sm ${populateStatus.type === 'success' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
+                {populateStatus.message}
+              </div>
+            )}
             <button 
               type="button"
-              className="px-4 py-2.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-sm transition-colors border border-indigo-200/60"
+              onClick={() => setIsUploadModalOpen(true)}
+              className="px-4 py-2.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-sm transition-colors border border-indigo-200/60 flex items-center gap-2"
             >
-              Populate Mock Database
+              <UploadCloud className="w-4 h-4" />
+              Import Real Data
             </button>
           </div>
         </div>
@@ -208,11 +298,11 @@ export const SchoolDetails: React.FC<SchoolDetailsProps> = ({ tenantId, onBack }
               </div>
               <div className="flex justify-between items-center pb-4 border-b border-stone-100">
                 <span className="text-sm font-medium text-stone-600">Teachers</span>
-                <span className="text-sm font-bold text-stone-900">{teachersCount}</span>
+                <span className="text-sm font-bold text-stone-900">{dbCounts.teachers}</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-sm font-medium text-stone-600">Students</span>
-                <span className="text-sm font-bold text-stone-900">0</span>
+                <span className="text-sm font-bold text-stone-900">{dbCounts.students}</span>
               </div>
             </div>
           </div>
@@ -261,6 +351,24 @@ export const SchoolDetails: React.FC<SchoolDetailsProps> = ({ tenantId, onBack }
           </div>
         </div>
       </div>
+      <SchoolImportWizard 
+        isOpen={isUploadModalOpen} 
+        onClose={() => setIsUploadModalOpen(false)} 
+        tenantId={tenant.id} 
+        tenantName={tenant.name}
+        onSuccess={() => {
+          setIsUploadModalOpen(false);
+          // Re-fetch counts
+          if (isUUID(tenant.id)) {
+            Promise.all([
+              supabase.from('students').select('*', { count: 'exact', head: true }).eq('school_id', tenant.id),
+              supabase.from('teachers').select('*', { count: 'exact', head: true }).eq('school_id', tenant.id)
+            ]).then(([{ count: sc }, { count: tc }]) => {
+              setDbCounts({ students: sc || 0, teachers: tc || 0 });
+            });
+          }
+        }}
+      />
     </div>
   );
 };
